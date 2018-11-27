@@ -28,18 +28,18 @@
   7. TX INFO bit informs if the sender info are included (value 1) or not (value 0)
   8. MODE bit informs if the packet is formatted in shared (value 1) or local mode (value 0)
  "
-    [:has_packet_id
-     :has_ext_length
-     :has_crc32
-     :has_port
-     :async_ack
-     :ack_requested
-     :has_tx_info
-     :mode_shared])
+    [:packet-id
+     :ext-length
+     :crc32
+     :port
+     :async-ack
+     :ack
+     :tx-info
+     :shared-mode])
 
 (defn packet-destination
  [packet]
- (merge {:dest_id (unchecked-byte (nth (:packet packet) 0))} packet))
+ (merge {:dest-id (unchecked-byte (nth (:packet packet) 0))} packet))
 
 (defn packet-header
   " Parse the first byte of the PJON packet"
@@ -50,10 +50,12 @@
 
 (defn packet-data-len
  [packet]
- (merge {:packet_len (if (:has_ext_length packet)
-                      (bytes->num (take-last 2 (take 4 (:packet packet))))
-                      (bytes->num [(aget (:packet packet) 2)]))}
-        packet))
+ (let [{:keys [ext-length bytes-overhead ]} packet]
+   (merge {:bytes-overhead (+ bytes-overhead (if ext-length 1 0))
+           :data-len     (if ext-length
+                           (bytes->num (take-last 2 (take 4 (:packet packet))))
+                           (bytes->num [(aget (:packet packet) 2)]))}
+          packet)))
 
 
 
@@ -65,7 +67,7 @@
           dst 0]
      (if
        (= src len)
-       {:length dst :packet (copy-packet p dst)}
+       {:packet-len dst :bytes-overhead 5 :packet (copy-packet p dst)}
        (if
          (=
            (nth p src)
@@ -81,16 +83,16 @@
 (defn packet-header-crc
  [packet]
  (let [p (:packet packet)
-       meta-len (if (:has_ext_length packet) 4 3)
+       meta-len (if (:ext-length packet) 4 3)
        packet-meta (copy-packet p meta-len)
        packet-crc (nth p meta-len)
        computed-crc (crc/crc8-compute packet-meta)]
-   (merge packet {:header_crc_ok (= computed-crc packet-crc)})))
+   (merge packet {:header-crc-ok (= computed-crc packet-crc)})))
 
 (defn packet-full-crc
  [packet]
  (let [p (:packet packet)
-       crc-len (if (:has_crc32 packet) 4 1)
+       crc-len (if (:crc32 packet) 4 1)
        data-len (- (alength p) crc-len)
        crc (bytes->num (take-last crc-len p))
        computed (crc/crc32-compute p data-len)]
@@ -100,7 +102,19 @@
                 "\ncomputed CRC " computed " " (java.lang.Long/toString (unchecked-long computed) 16)
                 "\ndata-len " data-len)))
 
-   (merge packet {:packet_crc_ok (= crc computed)})))
+   (merge packet {:bytes-overhead (+ (:bytes-overhead packet) (- crc-len 1))
+                  :packet-crc-ok  (= crc computed)})))
+
+(defn packet-id
+ [packet]
+ (if (:packet-id packet)
+     (merge {:bytes-overhead (+ (:bytes-overhead packet) 2)
+             :packet-id      (bytes->num [0])}
+            packet))
+ packet)
+
+(defn packet-overhead
+ [packet])
 
 (defn parse-packet
  [packet]
@@ -110,6 +124,7 @@
    packet-header
    packet-destination
    packet-data-len
+   packet-id
    packet-header-crc
    packet-full-crc))
 

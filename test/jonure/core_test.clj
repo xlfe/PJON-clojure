@@ -92,15 +92,15 @@
     (testing "packet computations on long packet"
       (is
         (=
-          (:packet_crc_ok packet)
+          (:packet-crc-ok packet)
           true))
       (is
         (=
-          (:has_ext_length packet)
+          (:ext-length packet)
           true))
       (is
         (=
-          (:header_crc_ok packet)
+          (:header-crc-ok packet)
           true)))))
 
 (deftest test-packet-crc-med-length
@@ -108,15 +108,15 @@
     (testing "packet computations on med packet"
       (is
         (=
-          (:packet_crc_ok packet)
+          (:packet-crc-ok packet)
           true))
       (is
         (=
-          (:has_ext_length packet)
+          (:ext-length packet)
           false))
       (is
         (=
-          (:header_crc_ok packet)
+          (:header-crc-ok packet)
           true)))))
 
 (deftest test-packet-crc-short-length
@@ -124,15 +124,15 @@
     (testing "packet computations on shorter packet"
         (is
           (=
-            (:packet_crc_ok packet)
+            (:packet-crc-ok packet)
             true))
         (is
           (=
-            (:has_ext_length packet)
+            (:ext-length packet)
             false))
         (is
           (=
-            (:header_crc_ok packet)
+            (:header-crc-ok packet)
             true)))))
 
 (deftest test-header-crc
@@ -155,3 +155,31 @@
     (is (=
           (crc/crc8-compute full)
           (unchecked-byte 0x2e)))))
+
+
+
+
+(def packet-with-id
+  (byte-array
+    (map
+      unchecked-byte
+      [0x0A 0xA6 0x20 0xC1 0x0B 0x13 0xEF  0x18 0x02 0xAD 0x01 0x18 0x2E 0x04 0x00 0xB5
+       0x01 0xC7 0x02 0x00 0x00 0xC2 0x0C  0x04 0x50 0x14 0xFD 0x5B 0x75 0x4A 0x88 0x6F])))
+
+
+(deftest test-packet-id
+  (let [packet (packet/parse-packet packet-with-id)]
+    (testing "test packet id"
+      (is
+        (=
+          (:packet-crc-ok packet)
+          true))
+      (is
+        (=
+          (:packet-id packet)
+          true))
+      (is
+        (=
+          (:header-crc-ok packet)
+          true)))))
+
