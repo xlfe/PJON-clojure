@@ -42,9 +42,9 @@
   (loop [crc 0
          i 0]
     (if (= i length)
-      (unchecked-byte crc)
+      crc
       (recur
-        (crc8-roll (aget input_bytes i) crc)
+        (crc8-roll (bit-and (aget input_bytes i) 0xff) crc)
         (inc i))))))
 
 

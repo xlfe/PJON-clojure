@@ -42,7 +42,7 @@
           (has-timed-out prev-received BYTE_TIME_OUT)
           (recur 0 (java-time/instant) [received-ts received-byte])
           (do
-            (aset-byte B i (unchecked-byte received-byte))
+            (aset-byte B i received-byte)
             (let [packet (packet/check-for-packet B i)]
               (if
                  (or

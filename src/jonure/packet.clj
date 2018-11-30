@@ -3,9 +3,9 @@
      [byte-streams]
      [jonure.crc :as crc]))
 
-(def SYM_START 0x95)
-(def SYM_END 0xEA)
-(def SYM_ESC 0xBB)
+(def SYM_START (unchecked-byte 0x95))
+(def SYM_END  (unchecked-byte 0xEA))
+(def SYM_ESC (unchecked-byte 0xBB))
 
 (defn bytes->num [data] (reduce bit-or (map-indexed (fn [i x] (bit-shift-left (bit-and x 0x0FF) (* 8 (- (count data) i 1)))) data)))
 
@@ -39,7 +39,7 @@
 
 (defn packet-destination
  [packet]
- (merge {:dest-id (unchecked-byte (nth (:packet packet) 0))} packet))
+ (merge packet {:dest-id (bytes->num [(nth (:packet packet) 0)])}))
 
 (defn packet-header
   " Parse the first byte of the PJON packet"
@@ -50,12 +50,11 @@
 
 (defn packet-data-len
  [packet]
- (let [{:keys [ext-length bytes-overhead ]} packet]
-   (merge {:bytes-overhead (+ bytes-overhead (if ext-length 1 0))
-           :data-len     (if ext-length
-                           (bytes->num (take-last 2 (take 4 (:packet packet))))
-                           (bytes->num [(aget (:packet packet) 2)]))}
-          packet)))
+ (let [{:keys [ext-length packet-overhead]} packet
+       data-len (if ext-length
+                    (bytes->num (take-last 2 (take 4 (:packet packet))))
+                    (bytes->num [(aget (:packet packet) 2)]))]
+   (merge packet {:data-len (- data-len packet-overhead)})))
 
 
 
@@ -67,13 +66,13 @@
           dst 0]
      (if
        (= src len)
-       {:packet-len dst :bytes-overhead 5 :packet (copy-packet p dst)}
+       {:packet-len dst :packet (copy-packet p dst)}
        (if
          (=
            (nth p src)
-           (unchecked-byte SYM_ESC))
+           SYM_ESC)
          (do
-           (aset-byte p dst (unchecked-byte (bit-xor (nth p (+ src 1)) SYM_ESC)))
+           (aset-byte p dst (bit-xor (nth p (+ src 1)) SYM_ESC))
            (recur (+ src 2) (inc dst)))
          (do
            (if (not (= dst src))
@@ -85,8 +84,15 @@
  (let [p (:packet packet)
        meta-len (if (:ext-length packet) 4 3)
        packet-meta (copy-packet p meta-len)
-       packet-crc (nth p meta-len)
+       packet-crc (bytes->num [(nth p meta-len)])
        computed-crc (crc/crc8-compute packet-meta)]
+
+   (if (not (= packet-crc computed-crc))
+     (println (str
+                "\npacket CRC " packet-crc " " (java.lang.Long/toString packet-crc) 16
+                "\ncomputed CRC " computed-crc " " (java.lang.Long/toString computed-crc) 16
+                "\nmeta-len " meta-len)))
+
    (merge packet {:header-crc-ok (= computed-crc packet-crc)})))
 
 (defn packet-full-crc
@@ -95,46 +101,91 @@
        crc-len (if (:crc32 packet) 4 1)
        data-len (- (alength p) crc-len)
        crc (bytes->num (take-last crc-len p))
-       computed (crc/crc32-compute p data-len)]
+       computed (if (:crc32 packet)
+                    (crc/crc32-compute p data-len)
+                    (crc/crc8-compute p data-len))]
    (if (not (= crc computed))
      (println (str
-                "\npacket CRC " crc " " (java.lang.Long/toString (unchecked-long crc) 16)
-                "\ncomputed CRC " computed " " (java.lang.Long/toString (unchecked-long computed) 16)
+                "\npacket CRC " crc " " (java.lang.Long/toString crc) 16
+                "\ncomputed CRC " computed " " (java.lang.Long/toString computed) 16
+                "\ncrc-len " crc-len
                 "\ndata-len " data-len)))
 
-   (merge packet {:bytes-overhead (+ (:bytes-overhead packet) (- crc-len 1))
-                  :packet-crc-ok  (= crc computed)})))
+   (merge packet
+          {:packet-crc-ok  (= crc computed)})))
 
 (defn packet-id
  [packet]
  (if (:packet-id packet)
-     (merge {:bytes-overhead (+ (:bytes-overhead packet) 2)
-             :packet-id      (bytes->num [0])}
-            packet))
- packet)
+   (let [packet-overhead (:packet-overhead packet)
+         packet-id-offset (- packet-overhead 2 (if (:port packet) 2 0))
+         packet-id      (bytes->num (take-last 2 (take (+ packet-id-offset 2) (:packet packet))))]
+     (merge packet {:packet-id packet-id}))
+   packet))
+
+(defn packet-tx-info
+  [packet]
+  (if (:tx-info packet)
+    (let [tx-offset (if (:ext-length packet) 5 4)
+          source-id (bytes->num [(aget (:packet packet) tx-offset)])]
+      (merge packet {:source-id source-id}))
+    packet))
+
+
+
+(defn packet-port
+  [packet]
+  (if (:port packet)
+    (let [packet-overhead (:packet-overhead packet)
+          ;packet-port-offset (- packet-overhead 2)
+          packet-id      (bytes->num (take-last 2 (take (- packet-overhead (if (:crc32 packet) 4 1)) (:packet packet))))]
+      (merge packet {:port packet-id}))
+    packet))
+
 
 (defn packet-overhead
- [packet])
+ [h]
+ (merge h {:packet-overhead
+           (+
+             1 ;header
+             1 ;header crc
+             (if (true? (:shared-mode h))
+               (if (true? (:tx-info h)) 10 5)
+               (if (true? (:tx-info h)) 2 1))
+             (if (true? (:ext-length h)) 2 1)
+             (if (true? (:crc32 h)) 4 1)
+             (if (true? (:port h)) 2 0)
+             (if (or (true? (:async-ack h)) (true? (:packet-id h))) 2 0))}))
+
+
 
 (defn parse-packet
  [packet]
  (->
    {:packet packet}
    packet-unescape
-   packet-header
+
    packet-destination
-   packet-data-len
+   packet-header
+   packet-overhead
+   packet-header-crc ;crc32
+
    packet-id
-   packet-header-crc
-   packet-full-crc))
+   packet-data-len
+   packet-full-crc
+   packet-port
+   ;ack
+   packet-tx-info)) ;tx-info
+   ;shared-mode
+
 
 (defn check-for-packet
  [p length]
  (if
    (and
      (< 5 length)
-     (= (first p) (unchecked-byte SYM_START))
-     (= (nth p length) (unchecked-byte SYM_END))
-     (not (= (nth p (dec length)) (unchecked-byte SYM_ESC))))
+     (= (first p) SYM_START)
+     (= (nth p length) SYM_END)
+     (not (= (nth p (dec length)) SYM_ESC)))
    (parse-packet (copy-packet p 1 length))
    nil))
