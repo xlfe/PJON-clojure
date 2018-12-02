@@ -114,14 +114,6 @@
    (merge packet
           {:packet-crc-ok  (= crc computed)})))
 
-(defn packet-id
- [packet]
- (if (:packet-id packet)
-   (let [packet-overhead (:packet-overhead packet)
-         packet-id-offset (- packet-overhead 2 (if (:port packet) 2 0))
-         packet-id      (bytes->num (take-last 2 (take (+ packet-id-offset 2) (:packet packet))))]
-     (merge packet {:packet-id packet-id}))
-   packet))
 
 (defn packet-tx-info
   [packet]
@@ -131,15 +123,28 @@
       (merge packet {:source-id source-id}))
     packet))
 
+(defn get-mid
+  [data start len]
+  (take-last len (take (+ start len) data)))
 
+
+(defn packet-id
+  "The packet will contain a packet ID if the PACKET_ID bit is set, or if both tx-info and async-ack are set"
+ [packet]
+ (if (or (:packet-id packet) (and (:tx-info packet) (:async-ack packet)))
+   (let [packet-overhead (:packet-overhead packet)
+         start (- packet-overhead 2 (if (:crc32 packet) 4 1) (if (:port packet) 2 0))
+         packet-id      (bytes->num (get-mid (:packet packet) start 2))]
+     (merge packet {:packet-id packet-id}))
+   packet))
 
 (defn packet-port
   [packet]
   (if (:port packet)
     (let [packet-overhead (:packet-overhead packet)
-          ;packet-port-offset (- packet-overhead 2)
-          packet-id      (bytes->num (take-last 2 (take (- packet-overhead (if (:crc32 packet) 4 1)) (:packet packet))))]
-      (merge packet {:port packet-id}))
+          offset (- packet-overhead 2 (if (:crc32 packet) 4 1))
+          port (bytes->num (get-mid (:packet packet) offset 2))]
+      (merge packet {:port port}))
     packet))
 
 
@@ -155,7 +160,10 @@
              (if (true? (:ext-length h)) 2 1)
              (if (true? (:crc32 h)) 4 1)
              (if (true? (:port h)) 2 0)
-             (if (or (true? (:async-ack h)) (true? (:packet-id h))) 2 0))}))
+             (if
+               (or
+                 (and (true? (:tx-info h)) (true? (:async-ack h)))
+                 (true? (:packet-id h))) 2 0))}))
 
 
 
@@ -168,7 +176,7 @@
    packet-destination
    packet-header
    packet-overhead
-   packet-header-crc ;crc32
+   packet-header-crc
 
    packet-id
    packet-data-len
