@@ -17,7 +17,8 @@
 (defn open-port
  [serial-port c]
  (let [port (serial.core/open serial-port)]
-  (serial.core/listen! port (make-handler c))))
+  (serial.core/listen! port (make-handler c))
+  port))
 
 (defn has-timed-out
  [inst timeout]
@@ -42,14 +43,15 @@
           (has-timed-out prev-received BYTE_TIME_OUT)
           (recur 0 (java-time/instant) [received-ts received-byte])
           (do
-            (aset-byte B i received-byte)
-            (let [packet (packet/check-for-packet B i)]
+            (aset-byte B i (unchecked-byte received-byte))
+            (let [packet (packet/try-for-packet B i)]
               (if
                  (or
                    (= (- BUF_SIZE 1) i)
                    (not (nil? packet)))
                  (do
-                  (byte-streams/print-bytes B)
+                  (serial.core/write port (byte 6))
+                  (byte-streams/print-bytes (:data packet))
                   (println packet)
                   (recur 0 received-ts (async/<!! c)))
                  (recur (inc i) received-ts (async/<!! c)))))))))

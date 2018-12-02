@@ -1,17 +1,12 @@
 (ns jonure.packet
    (:require
      [byte-streams]
+     [jonure.util :as util]
      [jonure.crc :as crc]))
 
 (def SYM_START (unchecked-byte 0x95))
 (def SYM_END  (unchecked-byte 0xEA))
 (def SYM_ESC (unchecked-byte 0xBB))
-
-(defn bytes->num [data] (reduce bit-or (map-indexed (fn [i x] (bit-shift-left (bit-and x 0x0FF) (* 8 (- (count data) i 1)))) data)))
-
-(defn copy-packet
- ([packet length] (copy-packet packet 0 length))
- ([packet start end] (byte-array (java.util.Arrays/copyOfRange packet start end))))
 
 (def header-bits
   "
@@ -39,7 +34,7 @@
 
 (defn packet-destination
  [packet]
- (merge packet {:dest-id (bytes->num [(nth (:packet packet) 0)])}))
+ (merge packet {:dest-id (util/bytes->num [(nth (:packet packet) 0)])}))
 
 (defn packet-header
   " Parse the first byte of the PJON packet"
@@ -52,8 +47,8 @@
  [packet]
  (let [{:keys [ext-length packet-overhead]} packet
        data-len (if ext-length
-                    (bytes->num (take-last 2 (take 4 (:packet packet))))
-                    (bytes->num [(aget (:packet packet) 2)]))]
+                    (util/bytes->num (take-last 2 (take 4 (:packet packet))))
+                    (util/bytes->num [(aget (:packet packet) 2)]))]
    (merge packet {:data-len (- data-len packet-overhead)})))
 
 
@@ -66,7 +61,7 @@
           dst 0]
      (if
        (= src len)
-       {:packet-len dst :packet (copy-packet p dst)}
+       {:packet-len dst :packet (util/copy-packet p dst)}
        (if
          (=
            (nth p src)
@@ -83,8 +78,8 @@
  [packet]
  (let [p (:packet packet)
        meta-len (if (:ext-length packet) 4 3)
-       packet-meta (copy-packet p meta-len)
-       packet-crc (bytes->num [(nth p meta-len)])
+       packet-meta (util/copy-packet p meta-len)
+       packet-crc (util/bytes->num [(nth p meta-len)])
        computed-crc (crc/crc8-compute packet-meta)]
 
    (if (not (= packet-crc computed-crc))
@@ -100,7 +95,7 @@
  (let [p (:packet packet)
        crc-len (if (:crc32 packet) 4 1)
        data-len (- (alength p) crc-len)
-       crc (bytes->num (take-last crc-len p))
+       crc (util/bytes->num (take-last crc-len p))
        computed (if (:crc32 packet)
                     (crc/crc32-compute p data-len)
                     (crc/crc8-compute p data-len))]
@@ -119,7 +114,7 @@
   [packet]
   (if (:tx-info packet)
     (let [tx-offset (if (:ext-length packet) 5 4)
-          source-id (bytes->num [(aget (:packet packet) tx-offset)])]
+          source-id (util/bytes->num [(aget (:packet packet) tx-offset)])]
       (merge packet {:source-id source-id}))
     packet))
 
@@ -134,7 +129,7 @@
  (if (or (:packet-id packet) (and (:tx-info packet) (:async-ack packet)))
    (let [packet-overhead (:packet-overhead packet)
          start (- packet-overhead 2 (if (:crc32 packet) 4 1) (if (:port packet) 2 0))
-         packet-id      (bytes->num (get-mid (:packet packet) start 2))]
+         packet-id      (util/bytes->num (get-mid (:packet packet) start 2))]
      (merge packet {:packet-id packet-id}))
    packet))
 
@@ -143,7 +138,7 @@
   (if (:port packet)
     (let [packet-overhead (:packet-overhead packet)
           offset (- packet-overhead 2 (if (:crc32 packet) 4 1))
-          port (bytes->num (get-mid (:packet packet) offset 2))]
+          port (util/bytes->num (get-mid (:packet packet) offset 2))]
       (merge packet {:port port}))
     packet))
 
@@ -165,7 +160,12 @@
                  (and (true? (:tx-info h)) (true? (:async-ack h)))
                  (true? (:packet-id h))) 2 0))}))
 
-
+(defn packet-data
+ [packet]
+ (let [{:keys [crc32 data-len packet-overhead]} packet
+       start (- packet-overhead (if crc32 4 1))
+       end  (+ data-len start)]
+   (merge packet {:data (util/copy-packet (:packet packet) start end)})))
 
 (defn parse-packet
  [packet]
@@ -183,11 +183,12 @@
    packet-full-crc
    packet-port
    ;ack
-   packet-tx-info)) ;tx-info
+   packet-tx-info
    ;shared-mode
+   packet-data))
 
 
-(defn check-for-packet
+(defn try-for-packet
  [p length]
  (if
    (and
@@ -195,5 +196,5 @@
      (= (first p) SYM_START)
      (= (nth p length) SYM_END)
      (not (= (nth p (dec length)) SYM_ESC)))
-   (parse-packet (copy-packet p 1 length))
+   (parse-packet (util/copy-packet p 1 length))
    nil))
