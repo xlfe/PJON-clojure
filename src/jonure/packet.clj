@@ -32,16 +32,34 @@
      :tx-info
      :shared-mode])
 
+(def header-map (zipmap header-bits (range 8)))
+
 (defn packet-destination
  [packet]
  (merge packet {:dest-id (util/bytes->num [(nth (:packet packet) 0)])}))
 
 (defn packet-header
-  " Parse the first byte of the PJON packet"
+  "Parse the first byte of the PJON packet"
   [packet]
-  (let [header-map (zipmap header-bits (range 8))
-        h (aget (:packet packet) 1)]
+  (let [h (aget (:packet packet) 1)]
     (reduce-kv #(assoc %1 %2 (bit-test h (- 7 %3))) packet header-map)))
+
+
+(defn pack-reduce
+ [_ k v]
+ (println (str "_:" _ " k:" k " v:" v))
+ (if
+   (true? v)
+   (bit-set _ (- 7 (k header-map)))
+   _))
+
+
+
+(defn pack-header
+  "Pack the header items into a single header byte"
+  [packet]
+  (reduce-kv pack-reduce 0x00000000 packet))
+
 
 (defn packet-data-len
  [packet]

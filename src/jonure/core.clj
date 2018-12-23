@@ -42,7 +42,6 @@
  (async/<!!
    (async/go
      (async/alt!
-      ;(async/timeout TIME_OUT) nil
       c ([_] _)
       outgoing ([out-packet] (send-packet port out-packet))))))
 
@@ -61,6 +60,7 @@
        B (byte-array BUF_SIZE)]
    (async/go-loop
      [i 0]
+
      (if-let [packet (packet/try-for-packet B i)]
 
        ;valid packet
