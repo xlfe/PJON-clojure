@@ -45,21 +45,17 @@
     (reduce-kv #(assoc %1 %2 (bit-test h (- 7 %3))) packet header-map)))
 
 
-(defn pack-reduce
- [_ k v]
- (println (str "_:" _ " k:" k " v:" v))
- (if
-   (true? v)
-   (bit-set _ (- 7 (k header-map)))
-   _))
-
-
-
 (defn pack-header
   "Pack the header items into a single header byte"
   [packet]
-  (reduce-kv pack-reduce 0x00000000 packet))
+  (reduce-kv
+    (fn
+      [_ k v]
+      (if (true? v)
+          (bit-set _ (- 7 (k header-map)))
+          _))
 
+    0x00000000 packet))
 
 (defn packet-data-len
  [packet]

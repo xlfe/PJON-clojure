@@ -11,16 +11,11 @@
 
 
 (deftest test-packet-header-encode
-  (testing "encode decode"
+  (testing "packet header encode / decode"
     (loop [i 0]
-      (println packet/header-map)
       (let [header (reduce-kv #(assoc %1 %2 (rand-bool %3)) {} packet/header-map)
             b (packet/pack-header header)
             u (packet/packet-header {:packet (byte-array [0 b])})]
-        (println header)
-        (is (= header u)))
-
-
-      (if (> 10 i)
+        (is (= header (select-keys u (keys header)))))
+      (if (> 100 i)
         (recur (inc i))))))
-
