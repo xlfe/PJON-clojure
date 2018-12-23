@@ -18,8 +18,8 @@
     (do
       (async/put! c
                   (try
-                    [(java-time/instant) (.read stream)]
-                    (catch java.io.IOException e [e nil]))))))
+                    {:byte (.read stream)}
+                    (catch java.io.IOException e {:error e}))))))
 
 (defn open-port
  [serial-port c]
@@ -33,28 +33,26 @@
 
 
 
-(defn- triage
- [c outgoing]
- (alt!
-  (async/timeout TIME_OUT) :timeout
-  c ([received] {:byte received})))
-
 (defn- send-packet
  [port out-packet]
  nil)
 
 (defn- wait-for-byte-or-outgoing
  [c outgoing port]
- (async/alt!
-  (async/timeout TIME_OUT) nil
-  c ([received] {:byte received})
-  outgoing ([out-packet]) (send-packet port out-packet)))
+ (async/<!!
+   (async/go
+     (async/alt!
+      ;(async/timeout TIME_OUT) nil
+      c ([_] _)
+      outgoing ([out-packet] (send-packet port out-packet))))))
 
 (defn- wait-for-byte
  [c]
- (async/alt!
-  (async/timeout TIME_OUT) :timeout
-  c ([received] {:byte received})))
+ (async/<!!
+   (async/go
+     (async/alt!
+      (async/timeout TIME_OUT) nil
+      c ([_] _)))))
 
 (defn- transport-loop
  [serial-port incoming outgoing]
@@ -64,17 +62,32 @@
    (async/go-loop
      [i 0]
      (if-let [packet (packet/try-for-packet B i)]
+
+       ;valid packet
        (do
          (serial.core/write port (byte 6))
          (async/put! incoming {:packet packet})
-         (recur 0)))
-     (if-let [result (if (= i 0)
-                         (wait-for-byte-or-outgoing c outgoing port)
-                         (wait-for-byte c))]
-       (do
-         (aset-byte B i (unchecked-byte (:byte result)))
-         (recur (inc i)))
-       (recur 0)))))
+         (recur 0))
+
+       ;not valid packet
+       (if-let [result (if (= i 0)
+                           (wait-for-byte-or-outgoing c outgoing port)
+                           (wait-for-byte c))]
+
+         (if (contains? result :byte)
+
+           ;byte received
+           (do
+             (aset-byte B i (unchecked-byte (:byte result)))
+             (recur (inc i)))
+
+           ;error
+           (do
+             (async/close! incoming)
+             (async/put! outgoing result)))
+
+         ;no byte received
+         (recur 0))))))
 
 
 
@@ -118,11 +131,15 @@
 
 (defn -main
   []
-  (let [[incoming outgoing] (create-channels serial-port)]
-    (async/<!! (async/go-loop
-                 [packet (async/<!! incoming)]
-                 (println packet)
-                 (if (contains? packet :packet)
-                   (do
-                     (byte-streams/print-bytes (:data (:packet packet)))
-                     (recur (async/<!! incoming))))))))
+  (let [incoming (async/chan)
+        outgoing (async/chan)]
+    (async/<!! (async/go
+                 (transport-loop serial-port incoming outgoing)
+                 (loop
+                   [packet (async/<!! incoming)]
+                   (println packet)
+                   (if (contains? packet :packet)
+                     (do
+                       (byte-streams/print-bytes (:data (:packet packet)))
+                       (recur (async/<!! incoming)))
+                     (println (str "ERROR: " (:error packet)))))))))
