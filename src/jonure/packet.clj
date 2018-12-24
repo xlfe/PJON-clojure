@@ -1,6 +1,7 @@
 (ns jonure.packet
    (:require
      [byte-streams]
+     [org.clojars.smee.binary.core :as bin]
      [jonure.util :as util]
      [jonure.crc :as crc]))
 
@@ -31,6 +32,35 @@
      :ack
      :tx-info
      :shared-mode])
+
+(defn header->body-codec
+ [{:keys [receiver-id header]}]
+ (apply
+   bin/ordered-map
+   (concat
+     [:packet-len (if (:ext-length header) :ushort :ubyte)
+      :header-crc :ubyte]
+     (if (:shared-mode header) [:receiver-bus-id (bin/repeated :byte :length 4)])
+     (if (and (:shared-mode header) (:tx-info header)) [:sender-bus-id (bin/repeated :byte :length 4)])
+     (if (:tx-info header) [:sender-id :byte])
+     (if (or
+           (and (:async-ack header) (:tx-info header))
+           (:packet-id header))
+         [:packet-id :ushort])
+     (if (:port header) [:port :ushort]))))
+
+
+(defn body->header
+ [body]
+ :test 1)
+
+(def binary-packet
+  (bin/header
+    ;header-codec
+    (bin/ordered-map :receiver-id :ubyte :header (bin/bits (reverse header-bits)))
+    header->body-codec
+    body->header
+    :keep-header? true))
 
 (def header-map (zipmap header-bits (range 8)))
 
