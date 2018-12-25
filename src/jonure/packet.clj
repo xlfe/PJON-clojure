@@ -3,12 +3,25 @@
      [byte-streams]
      [org.clojars.smee.binary.core :as bin]
      [jonure.util :as util]
+     [jonure.binary :as jb]
      [jonure.crc :as crc]))
 
 (def SYM_START (unchecked-byte 0x95))
 (def SYM_END  (unchecked-byte 0xEA))
 (def SYM_ESC (unchecked-byte 0xBB))
 
+(defn header->packet-overhead
+  [h]
+  (+
+    1 ;header
+    1 ;header crc
+    (if (:shared-mode h)
+      (if (:tx-info h) 10 5)
+      (if (:tx-info h) 2 1))
+    (if (:ext-length h) 2 1)
+    (if (:crc32 h) 4 1)
+    (if (:port h) 2 0)
+    (if (or (and (:tx-info h) (:async-ack h)) (:packet-id h)) 2 0)))
 (def header-bits
   "
   Header spec v3.0 :-
@@ -33,16 +46,28 @@
      :tx-info
      :shared-mode])
 
-(defn header->body-codec
+(defn body->header
+ [body]
+ :test 1)
+
+
+(defn header-start
+ [_]
+ (bin/ordered-map
+   :receiver-id :ubyte
+   :header (bin/bits (reverse header-bits))))
+
+
+(defn header-rest
  [{:keys [receiver-id header]}]
  (apply
    bin/ordered-map
    (concat
      [:packet-len (if (:ext-length header) :ushort :ubyte)
-      :header-crc :ubyte]
+      :header-crc :byte]
      (if (:shared-mode header) [:receiver-bus-id (bin/repeated :byte :length 4)])
      (if (and (:shared-mode header) (:tx-info header)) [:sender-bus-id (bin/repeated :byte :length 4)])
-     (if (:tx-info header) [:sender-id :byte])
+     (if (:tx-info header) [:sender-id :ubyte])
      (if (or
            (and (:async-ack header) (:tx-info header))
            (:packet-id header))
@@ -50,17 +75,26 @@
      (if (:port header) [:port :ushort]))))
 
 
-(defn body->header
- [body]
- :test 1)
+(defn data-and-crc
+ [{:keys [header packet-len]}]
+ (println header packet-len (header->packet-overhead header))
+ (bin/ordered-map
+  :data (bin/repeated :ubyte :length (- packet-len (header->packet-overhead header)))
+  :crc (if (:crc32 header) :int :byte)))
 
 (def binary-packet
-  (bin/header
+  (jb/progressive
+    [
+     header-start
+     header-rest
+     data-and-crc]
+
+
+    []))
     ;header-codec
-    (bin/ordered-map :receiver-id :ubyte :header (bin/bits (reverse header-bits)))
-    header->body-codec
-    body->header
-    :keep-header? true))
+    ;header->body-codec
+    ;body->header
+    ;:keep-header? true))
 
 (def header-map (zipmap header-bits (range 8)))
 

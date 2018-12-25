@@ -1,6 +1,7 @@
 (ns jonure.encode-test
   (:require [clojure.test :refer :all]
             [jonure.core-test :as ct]
+            [jonure.autogen-test :as ag]
             [jonure.crc :as crc]
             [byte-streams]
             [jonure.packet :as packet]
@@ -29,4 +30,13 @@
 (deftest test-full-packet-decode
   (testing "full decode"
     (is (= {}
-           (bin/decode packet/binary-packet (java.io.ByteArrayInputStream. ct/long-packet))))))
+           (bin/decode
+             packet/binary-packet
+             (java.io.ByteArrayInputStream.
+               (:packet
+                 (packet/packet-unescape
+                   {:packet
+                    ;ag/port_false-sync_ack_false-async_ack_false-tx_info_false-ext_len_false-crc32_false-packet_id_false-packet
+                    ;ag/port_true-sync_ack_true-async_ack_true-tx_info_false-ext_len_false-crc32_true-packet_id_false-packet
+                    ag/port_true-sync_ack_true-async_ack_true-tx_info_true-ext_len_true-crc32_false-packet_id_true-packet}))))))))
+                    ;ct/long-packet}))))))))
