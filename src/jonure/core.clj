@@ -57,7 +57,7 @@
  [serial-port incoming outgoing]
  (let [c (async/chan)
        port (open-port serial-port c)
-       B (byte-array BUF_SIZE)]
+       B (byte-array (* 10 BUF_SIZE))]
    (async/go-loop
      [i 0]
 
@@ -66,7 +66,7 @@
        ;valid packet
        (do
          (serial.core/write port (byte 6))
-         (async/put! incoming {:packet packet})
+         (async/put! incoming packet)
          (recur 0))
 
        ;not valid packet
@@ -138,8 +138,8 @@
                  (loop
                    [packet (async/<!! incoming)]
                    (println packet)
-                   (if (contains? packet :packet)
+                   (if (contains? packet :data)
                      (do
-                       (byte-streams/print-bytes (:data (:packet packet)))
+                       (byte-streams/print-bytes (byte-array (:data packet)))
                        (recur (async/<!! incoming)))
                      (println (str "ERROR: " (:error packet)))))))))

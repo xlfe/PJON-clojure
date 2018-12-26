@@ -46,11 +46,6 @@
      :tx-info
      :shared-mode])
 
-(defn body->header
- [body]
- :test 1)
-
-
 (defn header-start
  [_]
  (bin/ordered-map
@@ -59,12 +54,12 @@
 
 
 (defn header-rest
- [{:keys [receiver-id header]}]
+ [{:keys [header]}]
  (apply
    bin/ordered-map
    (concat
      [:packet-len (if (:ext-length header) :ushort :ubyte)
-      :header-crc :byte]
+      :header-crc :ubyte]
      (if (:shared-mode header) [:receiver-bus-id (bin/repeated :byte :length 4)])
      (if (and (:shared-mode header) (:tx-info header)) [:sender-bus-id (bin/repeated :byte :length 4)])
      (if (:tx-info header) [:sender-id :ubyte])
@@ -74,13 +69,18 @@
          [:packet-id :ushort])
      (if (:port header) [:port :ushort]))))
 
+;(defn add-header-crc
+; [{:keys [packet-len header receiver-id]}]
+; (bin/ordered-map :header-bytes
+;                  [(bin/constant :ubyte receiver-id)
+;                   (bin/constant :ubyte)))))
 
 (defn data-and-crc
  [{:keys [header packet-len]}]
- (println header packet-len (header->packet-overhead header))
+ ;(println header packet-len (header->packet-overhead header))
  (bin/ordered-map
   :data (bin/repeated :ubyte :length (- packet-len (header->packet-overhead header)))
-  :crc (if (:crc32 header) :int :byte)))
+  :crc (if (:crc32 header) :uint :ubyte)))
 
 (def binary-packet
   (jb/progressive
@@ -89,182 +89,58 @@
      header-rest
      data-and-crc]
 
-
     []))
     ;header-codec
     ;header->body-codec
     ;body->header
     ;:keep-header? true))
 
-(def header-map (zipmap header-bits (range 8)))
+(defn decode-packet
+ [data]
+ ;(println (str "Packet: " (hexify data)))
+ (let [packet (bin/decode binary-packet (java.io.ByteArrayInputStream. data))
+       crc-len (if (:crc32 (:header packet)) 4 1)
+       last-crc (util/bytes->num (take-last crc-len data))
+       data-len (- (:packet-len packet) crc-len)
+       computed (if (:crc32 (:header packet))
+                    (crc/crc32-compute data data-len)
+                    (crc/crc8-compute data data-len))]
+   (assert (=
+             (:header-crc packet)
+             (crc/crc8-compute data (if (:ext-length (:header packet)) 4 3))))
+   (if-not (= (:crc packet) computed)
+     (println (str
+                "\nparsed   crc: " (java.lang.Long/toHexString (:crc packet))
+                "\ncomputed crc: " (java.lang.Long/toHexString computed)
+                "\nbytes    crc: " (java.lang.Long/toHexString last-crc)
+                "\ncrc-len     : " crc-len
+                "\ndata-len    : " data-len)))
+   (assert (= (:crc packet) computed))
 
-(defn packet-destination
- [packet]
- (merge packet {:dest-id (util/bytes->num [(nth (:packet packet) 0)])}))
-
-(defn packet-header
-  "Parse the first byte of the PJON packet"
-  [packet]
-  (let [h (aget (:packet packet) 1)]
-    (reduce-kv #(assoc %1 %2 (bit-test h (- 7 %3))) packet header-map)))
+   packet))
 
 
-(defn pack-header
-  "Pack the header items into a single header byte"
-  [packet]
-  (reduce-kv
-    (fn
-      [_ k v]
-      (if (true? v)
-          (bit-set _ (- 7 (k header-map)))
-          _))
 
-    0x00000000 packet))
 
-(defn packet-data-len
- [packet]
- (let [{:keys [ext-length packet-overhead]} packet
-       data-len (if ext-length
-                    (util/bytes->num (take-last 2 (take 4 (:packet packet))))
-                    (util/bytes->num [(aget (:packet packet) 2)]))]
-   (merge packet {:data-len (- data-len packet-overhead)})))
-
+(defn packet-un-escape
+ [k v]
+ (if (:esc k)
+  {:val (conj (:val k) (bit-xor v SYM_ESC))}
+  (if (= v SYM_ESC)
+      (merge {:esc true} k)
+      {:val (conj (:val k) v)})))
 
 
 (defn packet-unescape
- [packet]
- (let [p (:packet packet)
-       len (alength p)]
-   (loop [src 0
-          dst 0]
-     (if
-       (= src len)
-       {:packet-len dst :packet (util/copy-packet p dst)}
-       (if
-         (=
-           (nth p src)
-           SYM_ESC)
-         (do
-           (aset-byte p dst (bit-xor (nth p (+ src 1)) SYM_ESC))
-           (recur (+ src 2) (inc dst)))
-         (do
-           (if (not (= dst src))
-             (aset-byte p dst (nth p src)))
-           (recur (inc src) (inc dst))))))))
-
-(defn packet-header-crc
- [packet]
- (let [p (:packet packet)
-       meta-len (if (:ext-length packet) 4 3)
-       packet-meta (util/copy-packet p meta-len)
-       packet-crc (util/bytes->num [(nth p meta-len)])
-       computed-crc (crc/crc8-compute packet-meta)]
-
-   (if (not (= packet-crc computed-crc))
-     (println (str
-                "\npacket CRC " packet-crc " " (java.lang.Long/toString packet-crc) 16
-                "\ncomputed CRC " computed-crc " " (java.lang.Long/toString computed-crc) 16
-                "\nmeta-len " meta-len)))
-
-   (merge packet {:header-crc-ok (= computed-crc packet-crc)})))
-
-(defn packet-full-crc
- [packet]
- (let [p (:packet packet)
-       crc-len (if (:crc32 packet) 4 1)
-       data-len (- (alength p) crc-len)
-       crc (util/bytes->num (take-last crc-len p))
-       computed (if (:crc32 packet)
-                    (crc/crc32-compute p data-len)
-                    (crc/crc8-compute p data-len))]
-   (if (not (= crc computed))
-     (println (str
-                "\npacket CRC " crc " " (java.lang.Long/toString crc) 16
-                "\ncomputed CRC " computed " " (java.lang.Long/toString computed) 16
-                "\ncrc-len " crc-len
-                "\ndata-len " data-len)))
-
-   (merge packet
-          {:packet-crc-ok  (= crc computed)})))
-
-
-(defn packet-tx-info
   [packet]
-  (if (:tx-info packet)
-    (let [tx-offset (if (:ext-length packet) 5 4)
-          source-id (util/bytes->num [(aget (:packet packet) tx-offset)])]
-      (merge packet {:source-id source-id}))
-    packet))
-
-(defn get-mid
-  [data start len]
-  (take-last len (take (+ start len) data)))
-
-
-(defn packet-id
-  "The packet will contain a packet ID if the PACKET_ID bit is set, or if both tx-info and async-ack are set"
- [packet]
- (if (or (:packet-id packet) (and (:tx-info packet) (:async-ack packet)))
-   (let [packet-overhead (:packet-overhead packet)
-         start (- packet-overhead 2 (if (:crc32 packet) 4 1) (if (:port packet) 2 0))
-         packet-id      (util/bytes->num (get-mid (:packet packet) start 2))]
-     (merge packet {:packet-id packet-id}))
-   packet))
-
-(defn packet-port
-  [packet]
-  (if (:port packet)
-    (let [packet-overhead (:packet-overhead packet)
-          offset (- packet-overhead 2 (if (:crc32 packet) 4 1))
-          port (util/bytes->num (get-mid (:packet packet) offset 2))]
-      (merge packet {:port port}))
-    packet))
-
-
-(defn packet-overhead
- [h]
- (merge h {:packet-overhead
-           (+
-             1 ;header
-             1 ;header crc
-             (if (true? (:shared-mode h))
-               (if (true? (:tx-info h)) 10 5)
-               (if (true? (:tx-info h)) 2 1))
-             (if (true? (:ext-length h)) 2 1)
-             (if (true? (:crc32 h)) 4 1)
-             (if (true? (:port h)) 2 0)
-             (if
-               (or
-                 (and (true? (:tx-info h)) (true? (:async-ack h)))
-                 (true? (:packet-id h))) 2 0))}))
-
-(defn packet-data
- [packet]
- (let [{:keys [crc32 data-len packet-overhead]} packet
-       start (- packet-overhead (if crc32 4 1))
-       end  (+ data-len start)]
-   (merge packet {:data (util/copy-packet (:packet packet) start end)})))
+  (let [escaped (:val (reduce packet-un-escape {:val []} packet))]
+    (byte-array escaped)))
 
 (defn parse-packet
  [packet]
- (->
-   {:packet packet}
+ (-> packet
    packet-unescape
-
-   packet-destination
-   packet-header
-   packet-overhead
-   packet-header-crc
-
-   packet-id
-   packet-data-len
-   packet-full-crc
-   packet-port
-   ;ack
-   packet-tx-info
-   ;shared-mode
-   packet-data))
-
+   decode-packet))
 
 (defn try-for-packet
  [p length]
@@ -274,5 +150,7 @@
      (= (first p) SYM_START)
      (= (nth p length) SYM_END)
      (not (= (nth p (dec length)) SYM_ESC)))
-   (parse-packet (util/copy-packet p 1 length))
+   (try
+     (parse-packet (util/copy-packet p 1 length))
+     (catch java.io.EOFException e nil))
    nil))
