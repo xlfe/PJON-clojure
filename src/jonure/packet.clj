@@ -6,9 +6,9 @@
      [jonure.binary :as jb]
      [jonure.crc :as crc]))
 
-(def SYM_START (unchecked-byte 0x95))
-(def SYM_END  (unchecked-byte 0xEA))
-(def SYM_ESC (unchecked-byte 0xBB))
+(def SYM_START (unchecked-byte 0x95)) ; -107 -> 46
+(def SYM_END  (unchecked-byte 0xEA)) ; -22 -> 81
+(def SYM_ESC (unchecked-byte 0xBB)) ; -69 -> 0
 
 (defn header->packet-overhead
   [h]
@@ -22,6 +22,8 @@
     (if (:crc32 h) 4 1)
     (if (:port h) 2 0)
     (if (or (and (:tx-info h) (:async-ack h)) (:packet-id h)) 2 0)))
+
+
 (def header-bits
   "
   Header spec v3.0 :-
@@ -46,6 +48,7 @@
      :tx-info
      :shared-mode])
 
+
 (defn header-start
  [_]
  (bin/ordered-map
@@ -69,11 +72,6 @@
          [:packet-id :ushort])
      (if (:port header) [:port :ushort]))))
 
-;(defn add-header-crc
-; [{:keys [packet-len header receiver-id]}]
-; (bin/ordered-map :header-bytes
-;                  [(bin/constant :ubyte receiver-id)
-;                   (bin/constant :ubyte)))))
 
 (defn data-and-crc
  [{:keys [header packet-len]}]
@@ -82,23 +80,11 @@
   :data (bin/repeated :ubyte :length (- packet-len (header->packet-overhead header)))
   :crc (if (:crc32 header) :uint :ubyte)))
 
-(def binary-packet
-  (jb/progressive
-    [
-     header-start
-     header-rest
-     data-and-crc]
-
-    []))
-    ;header-codec
-    ;header->body-codec
-    ;body->header
-    ;:keep-header? true))
+(def packet-defn [header-start header-rest data-and-crc])
 
 (defn decode-packet
  [data]
- ;(println (str "Packet: " (hexify data)))
- (let [packet (bin/decode binary-packet (java.io.ByteArrayInputStream. data))
+ (let [packet (bin/decode (jb/progressive packet-defn []) (java.io.ByteArrayInputStream. data))
        crc-len (if (:crc32 (:header packet)) 4 1)
        last-crc (util/bytes->num (take-last crc-len data))
        data-len (- (:packet-len packet) crc-len)
@@ -116,13 +102,33 @@
                 "\ncrc-len     : " crc-len
                 "\ndata-len    : " data-len)))
    (assert (= (:crc packet) computed))
-
    packet))
 
 
 
 
-(defn packet-un-escape
+(defn escape-map
+ [k v]
+ (condp = v
+   SYM_ESC (conj k SYM_ESC 0)
+   SYM_START (conj k SYM_ESC 46)
+   SYM_END (conj k SYM_ESC 81)
+   (conj k v)))
+
+
+(defn packet-escape
+ [data]
+ (byte-array (reduce escape-map [] data)))
+
+
+(defn make-packet
+ [data]
+ (let [buffer (java.io.ByteArrayOutputStream.)]
+   (bin/encode (jb/progressive [] packet-defn) buffer data)
+   (packet-escape (.toByteArray buffer))))
+
+
+(defn unescape-map
  [k v]
  (if (:esc k)
   {:val (conj (:val k) (bit-xor v SYM_ESC))}
@@ -133,7 +139,7 @@
 
 (defn packet-unescape
   [packet]
-  (let [escaped (:val (reduce packet-un-escape {:val []} packet))]
+  (let [escaped (:val (reduce unescape-map {:val []} packet))]
     (byte-array escaped)))
 
 (defn parse-packet

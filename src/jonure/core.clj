@@ -57,37 +57,39 @@
  [serial-port incoming outgoing]
  (let [c (async/chan)
        port (open-port serial-port c)
-       B (byte-array (* 10 BUF_SIZE))]
+       B (byte-array BUF_SIZE)]
    (async/go-loop
      [i 0]
 
-     (if-let [packet (packet/try-for-packet B i)]
+     (if (= i BUF_SIZE)
+       (recur 0)
+       (if-let [packet (packet/try-for-packet B i)]
 
-       ;valid packet
-       (do
-         (serial.core/write port (byte 6))
-         (async/put! incoming packet)
-         (recur 0))
+         ;valid packet
+         (do
+           (serial.core/write port (byte 6))
+           (async/put! incoming packet)
+           (recur 0))
 
-       ;not valid packet
-       (if-let [result (if (= i 0)
-                           (wait-for-byte-or-outgoing c outgoing port)
-                           (wait-for-byte c))]
+         ;not valid packet
+         (if-let [result (if (= i 0)
+                             (wait-for-byte-or-outgoing c outgoing port)
+                             (wait-for-byte c))]
 
-         (if (contains? result :byte)
+           (if (contains? result :byte)
 
-           ;byte received
-           (do
-             (aset-byte B i (unchecked-byte (:byte result)))
-             (recur (inc i)))
+             ;byte received
+             (do
+               (aset-byte B i (unchecked-byte (:byte result)))
+               (recur (inc i)))
 
-           ;error
-           (do
-             (async/close! incoming)
-             (async/put! outgoing result)))
+             ;error
+             (do
+               (async/close! incoming)
+               (async/put! outgoing result)))
 
-         ;no byte received
-         (recur 0))))))
+           ;no byte received
+           (recur 0)))))))
 
 
 

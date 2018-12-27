@@ -140,3 +140,11 @@
         (=
           (:packet-id packet)
           0x13EF)))))
+
+
+(deftest round-trip
+  (testing "test round trip"
+    (let [packet (packet/parse-packet packet-with-id)
+          encoded (packet/make-packet packet)]
+      (is (= (seq packet-with-id) (seq encoded))))))
+
