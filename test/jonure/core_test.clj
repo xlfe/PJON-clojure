@@ -85,49 +85,23 @@
   (let [packet (packet/parse-packet long-packet)]
     (testing "packet computations on long packet"
       (is
-        (=
-          (:packet-crc-ok packet)
-          true))
-      (is
-        (=
-          (:ext-length packet)
-          true))
-      (is
-        (=
-          (:header-crc-ok packet)
-          true)))))
+        (contains? (:header packet) :ext-length)))))
 
 (deftest test-packet-crc-med-length
   (let [packet (packet/parse-packet med-packet)]
     (testing "packet computations on med packet"
       (is
         (=
-          (:packet-crc-ok packet)
-          true))
-      (is
-        (=
-          (:ext-length packet)
-          false))
-      (is
-        (=
-          (:header-crc-ok packet)
-          true)))))
+          (contains? (:header packet) :ext-length)
+          false)))))
 
 (deftest test-packet-crc-short-length
   (let [packet (packet/parse-packet short-packet)]
     (testing "packet computations on shorter packet"
         (is
           (=
-            (:packet-crc-ok packet)
-            true))
-        (is
-          (=
-            (:ext-length packet)
-            false))
-        (is
-          (=
-            (:header-crc-ok packet)
-            true)))))
+            (contains? (:header packet) :ext-length)
+            false)))))
 
 (deftest test-header-crc
   (testing "header crc"
@@ -164,13 +138,5 @@
     (testing "test packet id"
       (is
         (=
-          (:packet-crc-ok packet)
-          true))
-      (is
-        (=
           (:packet-id packet)
-          0x13EF))
-      (is
-        (=
-          (:header-crc-ok packet)
-          true)))))
+          0x13EF)))))
