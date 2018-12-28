@@ -121,11 +121,49 @@
  (byte-array (reduce escape-map [] data)))
 
 
+(defn make-header
+ [data]
+ (apply (partial conj (:header data))
+        (filter #(not (nil? %))
+                [
+                  (if (or
+                        (contains? data :sender-bus-id)
+                        (contains? data :receiver-bus-id)) :shared-mode)
+                  (if (contains? data :sender-id) :tx-info)
+                  (if (> (count (:data data)) 240) :ext-length)
+                  (if (> (count (:data data)) 8) :crc32)
+                  (if (contains? data :port) :port)
+                  (if (contains? data :packet-id) :packet-id)])))
+
 (defn make-packet
  [data]
- (let [buffer (java.io.ByteArrayOutputStream.)]
+ {:pre [(contains? data :header)
+        (contains? data :receiver-id)
+        (contains? data :data)]}
+ (let [buffer (java.io.ByteArrayOutputStream.)
+       data   (assoc data :header (make-header data))
+       data   (assoc data :packet-len (+ (count (:data data)) (header->packet-overhead (:header data))))
+       ;add placeholder crc values
+       data   (assoc data :header-crc 0x00)
+       data   (assoc data :crc 0x00000000)]
+
    (bin/encode (jb/progressive [] packet-defn) buffer data)
-   (packet-escape (.toByteArray buffer))))
+   (let [out-data (.toByteArray buffer)
+         header-crc-pos  (if (:ext-length (:header data)) 4 3)
+         header-crc (crc/crc8-compute out-data header-crc-pos)
+         tail-crc-len (if (:crc32 (:header data)) 4 1)]
+     (aset-byte out-data header-crc-pos (unchecked-byte header-crc))
+
+     (let [tail-crc-start (- (count out-data) tail-crc-len)
+           crc (if (:crc32 (:header data))
+                   (crc/crc32-compute out-data tail-crc-start)
+                   (crc/crc8-compute out-data tail-crc-start))
+           crc-buf (java.io.ByteArrayOutputStream.)
+           crc-encode (bin/encode (if (:crc32 (:header data)) :uint :ubyte) crc-buf crc)
+           crc-bytes (.toByteArray crc-buf)]
+
+       (java.lang.System/arraycopy crc-bytes 0 out-data tail-crc-start tail-crc-len)
+       (packet-escape out-data)))))
 
 
 (defn unescape-map

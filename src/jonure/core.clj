@@ -7,8 +7,7 @@
         [java-time]
         [serial.core]))
 
-(def TIME_OUT 50)
-(def BYTE_TIME_OUT (java-time/millis TIME_OUT))
+(def TIME_OUT 50) ;ms
 (def BUF_SIZE 512)
 
 (def serial-port "/dev/tty.wchusbserial1410")
@@ -27,14 +26,9 @@
   (serial.core/listen! port (make-handler c))
   port))
 
-(defn has-timed-out
- [inst timeout]
- (java-time/after? (java-time/instant) (java-time/plus inst timeout)))
-
-
-
 (defn- send-packet
  [port out-packet]
+ (serial.core/write port (packet/packet-escape (packet/make-packet out-packet)))
  nil)
 
 (defn- wait-for-byte-or-outgoing
@@ -85,50 +79,11 @@
 
              ;error
              (do
-               (async/close! incoming)
-               (async/put! outgoing result)))
+               (async/put! incoming result)
+               (async/close! incoming)))
 
            ;no byte received
            (recur 0)))))))
-
-
-
-
-(defn create-channels
-  [serial-port]
-  (let [packets-received (async/chan)
-        packets-to-send (async/chan)
-        c (async/chan)
-        port (open-port serial-port c)
-        B (byte-array BUF_SIZE)]
-    (async/go-loop
-      [i 0
-       prev-received (java-time/instant)
-       [received-ts received-byte] (async/<!! c)]
-      (if (= i 0)
-        (java.util.Arrays/fill B (byte 0)))
-
-      (if (nil? received-byte)
-        (async/put! packets-received {:error received-ts} (fn [ret] (do (async/close! packets-received) (async/close! packets-to-send))))
-        (if (has-timed-out prev-received BYTE_TIME_OUT)
-          (do
-            ;timeout - check for outgoing packets
-            (recur 0 (java-time/instant) [received-ts received-byte]))
-          (do
-            (aset-byte B i (unchecked-byte received-byte))
-            (let [packet (packet/try-for-packet B i)]
-              (if
-                 (or
-                   (= (- BUF_SIZE 1) i)
-                   (not (nil? packet)))
-                 (do
-                  (serial.core/write port (byte 6))
-                  (async/put! packets-received {:packet packet})
-                  ;packet received - check for outgoing
-                  (recur 0 received-ts (async/<!! c)))
-                 ;packet reception in progress - don't check for outgoing
-                 (recur (inc i) received-ts (async/<!! c))))))))
-    [packets-received packets-to-send]))
 
 
 (defn -main
@@ -143,5 +98,6 @@
                    (if (contains? packet :data)
                      (do
                        (byte-streams/print-bytes (byte-array (:data packet)))
+                       (async/put! outgoing {:receiver-id 10 :header #{:ack} :data (byte-array [1 2 3 4 5 6 7 8 9 10])})
                        (recur (async/<!! incoming)))
                      (println (str "ERROR: " (:error packet)))))))))
