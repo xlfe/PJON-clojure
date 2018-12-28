@@ -1,9 +1,9 @@
-(ns jonure.core
+(ns PJON.core
     (:require
         [clojure.core.async :as async]
         [byte-streams]
         [serial.util]
-        [jonure.packet :as packet]
+        [PJON.packet :as packet]
         [java-time]
         [serial.core]))
 
@@ -28,7 +28,10 @@
 
 (defn- send-packet
  [port out-packet]
- (serial.core/write port (packet/packet-escape (packet/make-packet out-packet)))
+ (let [data (packet/make-packet out-packet)
+       escaped (byte-array (concat [packet/SYM_START] data [packet/SYM_END]))]
+   (byte-streams/print-bytes escaped)
+   (serial.core/write port escaped))
  nil)
 
 (defn- wait-for-byte-or-outgoing
@@ -74,6 +77,7 @@
 
              ;byte received
              (do
+               (println (str "Byte received: " (:byte result)))
                (aset-byte B i (unchecked-byte (:byte result)))
                (recur (inc i)))
 
@@ -98,6 +102,6 @@
                    (if (contains? packet :data)
                      (do
                        (byte-streams/print-bytes (byte-array (:data packet)))
-                       (async/put! outgoing {:receiver-id 10 :header #{:ack} :data (byte-array [1 2 3 4 5 6 7 8 9 10])})
+                       (async/put! outgoing {:receiver-id 11 :sender-id 10 :header #{:ack :tx-info} :data (byte-array [1 2 3 4 5 6 7 8 9 10])})
                        (recur (async/<!! incoming)))
                      (println (str "ERROR: " (:error packet)))))))))

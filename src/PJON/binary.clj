@@ -1,4 +1,4 @@
-(ns jonure.binary
+(ns PJON.binary
   (:require
     [org.clojars.smee.binary.core :as bin]))
 

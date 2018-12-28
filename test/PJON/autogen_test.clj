@@ -1,9 +1,9 @@
 
-(ns jonure.autogen-test
+(ns PJON.autogen-test
   (:require [clojure.test :refer :all]
-            [jonure.crc :as crc]
-            [jonure.packet :as packet]
-            [jonure.core :refer :all]))
+            [PJON.crc :as crc]
+            [PJON.packet :as packet]
+            [PJON.core :refer :all]))
 
 ;these tests are genereated using PJON-cython
 

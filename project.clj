@@ -1,4 +1,4 @@
-(defproject jonure "0.1.0-SNAPSHOT"
+(defproject net.xlfe/PJON-clojure "0.1.0-SNAPSHOT"
   :description "PJON in clojure"
   :url "http://github.com/xlfe/PJON-clojure"
   :license {:name "Eclipse Public License"

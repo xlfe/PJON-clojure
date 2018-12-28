@@ -1,8 +1,8 @@
-(ns jonure.core-test
+(ns PJON.core-test
   (:require [clojure.test :refer :all]
-            [jonure.crc :as crc]
-            [jonure.packet :as packet]
-            [jonure.core :refer :all]))
+            [PJON.crc :as crc]
+            [PJON.packet :as packet]
+            [PJON.core :refer :all]))
 
 (deftest test-crc8
   (testing "crc8 computations"

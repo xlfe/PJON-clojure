@@ -1,10 +1,10 @@
-(ns jonure.packet
+(ns PJON.packet
    (:require
      [byte-streams]
      [org.clojars.smee.binary.core :as bin]
-     [jonure.util :as util]
-     [jonure.binary :as jb]
-     [jonure.crc :as crc]))
+     [PJON.util :as util]
+     [PJON.binary :as jb]
+     [PJON.crc :as crc]))
 
 (def SYM_START (unchecked-byte 0x95)) ; -107 -> 46
 (def SYM_END  (unchecked-byte 0xEA)) ; -22 -> 81

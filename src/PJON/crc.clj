@@ -1,4 +1,4 @@
-(ns jonure.crc
+(ns PJON.crc
   (:require
     [clojure.test]))
 
