@@ -30,9 +30,10 @@
  [port out-packet]
  (let [data (packet/make-packet out-packet)
        escaped (byte-array (concat [packet/SYM_START] data [packet/SYM_END]))]
-   (byte-streams/print-bytes escaped)
    (serial.core/write port escaped))
- nil)
+ (if (contains? (:header out-packet) :ack)
+   {:sent out-packet}
+   nil))
 
 (defn- wait-for-byte-or-outgoing
  [c outgoing port]
@@ -43,51 +44,80 @@
       outgoing ([out-packet] (send-packet port out-packet))))))
 
 (defn- wait-for-byte
- [c]
+ [c timeout-ms]
  (async/<!!
    (async/go
      (async/alt!
-      (async/timeout TIME_OUT) nil
+      (async/timeout timeout-ms) nil
       c ([_] _)))))
 
-(defn- transport-loop
- [serial-port incoming outgoing]
+(defn transport-loop
+  "
+  Three modes -
+    :nil waiting for incoming bytes or outgoing packet
+    :in - incoming bytes
+    :out - packet sending
+
+  "
+ [serial-port
+  incoming
+  outgoing
+  & {:keys [ts-response-time-out-ms
+            ts-byte-time-out-ms
+            packet-max-length]
+     :or {ts-response-time-out-ms 10
+          ts-byte-time-out-ms 50
+          packet-max-length 50}}]
+
  (let [c (async/chan)
        port (open-port serial-port c)
+       BUF_SIZE (* 4 packet-max-length)
        B (byte-array BUF_SIZE)]
    (async/go-loop
-     [i 0]
+     [i 0
+      need-ack false]
 
      (if (= i BUF_SIZE)
-       (recur 0)
+       (recur 0 false)
        (if-let [packet (packet/try-for-packet B i)]
 
          ;valid packet
          (do
            (serial.core/write port (byte 6))
            (async/put! incoming packet)
-           (recur 0))
+           (recur 0 false))
 
          ;not valid packet
          (if-let [result (if (= i 0)
                              (wait-for-byte-or-outgoing c outgoing port)
-                             (wait-for-byte c))]
+                             (wait-for-byte c ts-byte-time-out-ms))]
 
-           (if (contains? result :byte)
 
-             ;byte received
-             (do
-               (println (str "Byte received: " (:byte result)))
-               (aset-byte B i (unchecked-byte (:byte result)))
-               (recur (inc i)))
+           (condp #(contains? %2 %1) result
+             :sent (recur 1 (:sent result))
+             :byte (if need-ack
+                      (if (= (byte 6) (:byte result))
+                        (do
+                          (println "Ack received")
+                          (recur 0 false))
+                        (if (> 2 i)
+                          (do
+                            (println "resending" (char (:byte result)))
+                            (send-packet port need-ack)
+                            ;(async/put! outgoing need-ack);resend
+                            (recur (inc i) need-ack))
+                          (do
+                            (println "failed")
+                            (recur 0 false))))
+                      (do
+                        (aset-byte B i (unchecked-byte (:byte result)))
+                        (recur (inc i) false)))
 
-             ;error
-             (do
-               (async/put! incoming result)
-               (async/close! incoming)))
+             :error (do
+                       (async/put! incoming result)
+                       (async/close! incoming)))
 
-           ;no byte received
-           (recur 0)))))))
+           (recur 0 false)))))))
 
 
 (defn -main
