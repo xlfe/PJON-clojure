@@ -6,9 +6,9 @@
      [PJON.binary :as jb]
      [PJON.crc :as crc]))
 
-(def SYM_START (unchecked-byte 0x95)) ; -107 -> 46
-(def SYM_END  (unchecked-byte 0xEA)) ; -22 -> 81
-(def SYM_ESC (unchecked-byte 0xBB)) ; -69 -> 0
+(def SYM_START (unchecked-byte 0x95)) ; 149 / -107 -> 46
+(def SYM_END  (unchecked-byte 0xEA)) ; 234 -22 -> 81
+(def SYM_ESC (unchecked-byte 0xBB)) ; 187 -69 -> 0
 
 (defn header->packet-overhead
   [h]
